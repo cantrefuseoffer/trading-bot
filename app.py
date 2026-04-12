@@ -5,8 +5,8 @@ import os
 app = Flask(__name__)
 
 # API ключи из Render ENV
-API_KEY = os.environ.get("BINANCE_API_KEY")
-API_SECRET = os.environ.get("BINANCE_API_SECRET")
+API_KEY = os.environ.get("BINANCE_API_SECRET")
+API_SECRET = os.environ.get("BINANCE_SECRET_KEY")
 
 client = Client(API_KEY, API_SECRET)
 
