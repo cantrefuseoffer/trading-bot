@@ -10,13 +10,6 @@ def webhook():
         print("⚠️ Пустой запрос")
         return jsonify({"error": "no data"}), 400
 
-    print("🔥 SIGNAL:", data)
+    print("🔥 Получен сигнал:", data)
 
     return jsonify({"status": "ok"})
-
-@app.route('/')
-def home():
-    return "Server is running"
-
-if name == '__main__':
-    app.run(host='0.0.0.0', port=10000)
