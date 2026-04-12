@@ -1,96 +1,57 @@
 from flask import Flask, request, jsonify
-import threading
-import time
-import os
 from binance.client import Client
+import os
 
 app = Flask(__name__)
 
-# 🔑 Binance API
-client = Client(
-    os.getenv("BINANCE_API_KEY"),
-    os.getenv("BINANCE_SECRET_KEY")
-)
+# API ключи из Render ENV
+API_KEY = os.environ.get("BINANCE_API_KEY")
+API_SECRET = os.environ.get("BINANCE_API_SECRET")
 
-# 👉 подключаем testnet futures
-client.FUTURES_URL = "https://testnet.binancefuture.com"
+client = Client(API_KEY, API_SECRET)
 
-# 💓 heartbeat лог
-def heartbeat():
-    while True:
-        print("💓 Heartbeat: сервер работает")
-        time.sleep(60)
+SYMBOL = "BTCUSDT"
+QUANTITY = 0.001  # настрой под себя
 
-threading.Thread(target=heartbeat, daemon=True).start()
-
-
-# 🏠 проверка сервера
-@app.route('/')
+@app.route("/")
 def home():
-    return "Server is alive", 200
+    return "Bot is alive 🚀"
 
-@app.route('/health')
-def health():
-    return {"status": "ok"}, 200
-
-
-# 🔍 проверка открытой позиции
-def has_open_position(symbol="BTCUSDT"):
-    try:
-        positions = client.futures_position_information(symbol=symbol)
-        for p in positions:
-            if float(p['positionAmt']) != 0:
-                return True
-        return False
-    except Exception as e:
-        print("❌ Ошибка проверки позиции:", e)
-        return True  # на всякий случай блокируем
-
-
-# 🚀 открытие позиции
-def open_position(signal):
-    symbol = "BTCUSDT"
-    quantity = 0.001  # тестовый объем
-
-    if has_open_position(symbol):
-        print("⚠️ Уже есть открытая позиция")
-        return
-
-    try:
-        if signal == "LONG":
-            side = "BUY"
-        elif signal == "SHORT":
-            side = "SELL"
-        else:
-            print("❌ Неизвестный сигнал:", signal)
-            return
-
-        order = client.futures_create_order(
-            symbol=symbol,
-            side=side,
-            type="MARKET",
-            quantity=quantity
-        )
-
-        print("✅ Открыта позиция:", order)
-
-    except Exception as e:
-        print("❌ Ошибка ордера:", e)
-
-
-# 📩 webhook от TradingView
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
 
     if not data:
-        print("⚠️ Пустой запрос")
         return jsonify({"error": "no data"}), 400
+
+    print("🔥 Получен сигнал:", data)
 
     signal = data.get("signal")
 
-    print("🔥 Получен сигнал:", signal)
+    try:
+        if signal == "LONG":
+            order = client.futures_create_order(
+                symbol=SYMBOL,
+                side="BUY",
+                type="MARKET",
+                quantity=QUANTITY
+            )
+            print("✅ LONG открыт:", order)
 
-    open_position(signal)
+        elif signal == "SHORT":
+            order = client.futures_create_order(
+                symbol=SYMBOL,
+                side="SELL",
+                type="MARKET",
+                quantity=QUANTITY
+            )
+            print("✅ SHORT открыт:", order)
 
-    return jsonify({"status": "ok"})
+        else:
+            return jsonify({"error": "unknown signal"}), 400
+
+        return jsonify({"status": "order sent"})
+
+    except Exception as e:
+        print("❌ Ошибка:", str(e))
+        return jsonify({"error": str(e)}), 500
