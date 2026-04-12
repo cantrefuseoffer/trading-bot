@@ -1,6 +1,16 @@
 from flask import Flask, request, jsonify
+import threading
+import time
 
 app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Server is alive", 200
+
+@app.route('/health')
+def health():
+    return {"status": "ok"}, 200
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -11,5 +21,12 @@ def webhook():
         return jsonify({"error": "no data"}), 400
 
     print("🔥 Получен сигнал:", data)
-
     return jsonify({"status": "ok"})
+
+# 💓 heartbeat лог
+def heartbeat():
+    while True:
+        print("💓 Heartbeat: сервер работает")
+        time.sleep(60)
+
+threading.Thread(target=heartbeat, daemon=True).start()
