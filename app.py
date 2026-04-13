@@ -20,7 +20,8 @@ LEVERAGE = 10 # плечо
 # 🔒 защита от дублей
 last_signal = None
 
-# 🚀 выставляем плечо при старте
+
+# 🚀 установка плеча (исправленный try!)
 try:
 client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
 print(f"✅ Установлено плечо {LEVERAGE}x")
@@ -31,6 +32,11 @@ print("❌ Ошибка установки плеча:", e)
 @app.route("/")
 def home():
 return "Bot is alive 🚀"
+
+
+@app.route("/health")
+def health():
+return {"status": "ok"}
 
 
 # 💰 баланс
@@ -45,12 +51,9 @@ return 0
 # 📦 расчёт позиции
 def calculate_quantity(price):
 balance = get_balance()
-
 risk_amount = balance * (RISK_PERCENT / 100)
 position_size = risk_amount * LEVERAGE
-
 qty = position_size / price
-
 return round(qty, 3)
 
 
@@ -73,10 +76,9 @@ if not data:
 return jsonify({"error": "no data"}), 400
 
 signal = data.get("signal")
-
 print("🔥 Сигнал:", signal)
 
-# ❌ защита от дублей
+# 🔒 защита от дублей
 if signal == last_signal:
 print("⚠️ Дубликат сигнала — пропуск")
 return jsonify({"status": "duplicate ignored"})
@@ -94,10 +96,10 @@ quantity = calculate_quantity(current_price)
 print(f"💰 Баланс: {get_balance()} USDT")
 print(f"📦 Размер позиции: {quantity}")
 
-# 📊 проверяем позицию
+# 📊 проверка позиции
 position = get_position()
 
-# 🔄 закрываем старую позицию
+# 🔄 закрытие старой позиции
 if position:
 print("🔄 Закрываем текущую позицию")
 
@@ -110,7 +112,7 @@ type="MARKET",
 quantity=abs(float(position['positionAmt']))
 )
 
-# 🚀 определяем сторону
+# 🚀 направление сделки
 if signal == "LONG":
 side = "BUY"
 elif signal == "SHORT":
@@ -118,7 +120,7 @@ side = "SELL"
 else:
 return jsonify({"error": "unknown signal"}), 400
 
-# 🚀 открываем сделку
+# 🚀 открытие позиции
 order = client.futures_create_order(
 symbol=SYMBOL,
 side=side,
