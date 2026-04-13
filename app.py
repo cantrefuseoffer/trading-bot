@@ -4,14 +4,15 @@ import os
 
 app = Flask(__name__)
 
-# API ключи из Render ENV
-API_KEY = os.environ.get("BINANCE_API_SECRET")
+API_KEY = os.environ.get("BINANCE_API_KEY")
 API_SECRET = os.environ.get("BINANCE_SECRET_KEY")
 
+# ✅ ВАЖНО: testnet режим
 client = Client(API_KEY, API_SECRET)
+client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
 
 SYMBOL = "BTCUSDT"
-QUANTITY = 0.001  # настрой под себя
+QUANTITY = 0.001
 
 @app.route("/")
 def home():
@@ -46,9 +47,6 @@ def webhook():
                 quantity=QUANTITY
             )
             print("✅ SHORT открыт:", order)
-
-        else:
-            return jsonify({"error": "unknown signal"}), 400
 
         return jsonify({"status": "order sent"})
 
