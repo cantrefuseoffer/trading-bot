@@ -23,11 +23,10 @@ last_signal = None
 
 # 🚀 установка плеча (исправленный try!)
 try:
-client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
-print(f"✅ Установлено плечо {LEVERAGE}x")
+    client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
+    print(f"✅ Установлено плечо {LEVERAGE}x")
 except Exception as e:
-print("❌ Ошибка установки плеча:", e)
-
+    print("❌ Ошибка установки плеча:", e)
 
 @app.route("/")
 def home():
