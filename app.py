@@ -12,12 +12,12 @@ client = Client(API_KEY, API_SECRET)
 client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
 
 SYMBOL = "BTCUSDT"
-QUANTITY = 0.001
-LEVERAGE = 10
+QUANTITY = 0.1
+LEVERAGE = 30
 
 # настройки стратегии
-TRAILING_CALLBACK = 1.2  # %
-STOP_LOSS_PCT = 0.6      # %
+TRAILING_CALLBACK = 1.0  # %
+STOP_LOSS_PCT = 0.3      # %
 
 last_signal = None
 last_trade_time = 0
