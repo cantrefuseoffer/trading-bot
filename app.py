@@ -12,8 +12,8 @@ client = Client(API_KEY, API_SECRET)
 client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
 
 SYMBOL = "BTCUSDT"
-QUANTITY = 0.001
-LEVERAGE = 10
+QUANTITY = 1
+LEVERAGE = 50
 
 # настройки стратегии
 import random
