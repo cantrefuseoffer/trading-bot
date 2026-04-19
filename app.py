@@ -113,6 +113,17 @@ def webhook():
 
         print(f"📍 Entry price (real): {entry_price}")
 
+        position = get_position()
+
+        if not position:
+            print("Позиция не найдена, пробуем еще раз...")
+            time.sleep(1)
+            position = get_position()
+
+        if not position:
+            return jsonify({"error": "position not found"}), 500
+        qty = abs(float(position['positionAmt']))
+
         # 🔥 ТРЕЙЛИНГ СТОП
         trailing_callback = round(random.uniform(0.5, 1.0), 2)
 
@@ -121,7 +132,7 @@ def webhook():
             side=exit_side,
             type="TRAILING_STOP_MARKET",
             callbackRate=trailing_callback,
-            closePosition=True
+            quantity=qty
         )
         print(f"🎯 Trailing: {trailing_callback}%")
 
