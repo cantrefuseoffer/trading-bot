@@ -33,6 +33,10 @@ except Exception as e:
 def home():
     return "Bot is alive 🚀"
 
+@app.route("/health")
+def health():
+    return "ok", 200
+
 def get_position():
     positions = client.futures_position_information(symbol=SYMBOL)
     for p in positions:
@@ -102,8 +106,6 @@ def webhook():
 
         print("✅ Открыта позиция:", order)
 
-        import time
-
         time.sleep(2)
 
         ticker = client.futures_mark_price(symbol=SYMBOL)
@@ -119,7 +121,6 @@ def webhook():
             side=exit_side,
             type="TRAILING_STOP_MARKET",
             callbackRate=trailing_callback,
-            activationPrice=entry_price,
             closePosition=True
         )
         print(f"🎯 Trailing: {trailing_callback}%")
