@@ -12,12 +12,11 @@ client = Client(API_KEY, API_SECRET)
 client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
 
 SYMBOL = "BTCUSDT"
-QUANTITY = 0.1
-LEVERAGE = 30
+QUANTITY = 0.001
+LEVERAGE = 10
 
 # настройки стратегии
-TRAILING_CALLBACK = 1.0  # %
-STOP_LOSS_PCT = 0.3      # %
+import random
 
 last_signal = None
 last_trade_time = 0
@@ -103,32 +102,27 @@ def webhook():
 
         print("✅ Открыта позиция:", order)
 
-        entry_price = float(order['avgPrice'])
+        import time
 
-        # стоп-лосс (страховка)
-        if signal == "LONG":
-            sl_price = entry_price * (1 - STOP_LOSS_PCT / 100)
-        else:
-            sl_price = entry_price * (1 + STOP_LOSS_PCT / 100)
-        client.futures_create_order(
-            symbol=SYMBOL,
-            side=exit_side,
-            type="STOP_MARKET",
-            stopPrice=round(sl_price, 2),
-            closePosition=True
-        )
+        time.sleep(2)
 
-        print(f"🛑 SL: {sl_price}")
+        ticker = client.futures_mark_price(symbol=SYMBOL)
+        entry_price = round(float(ticker['markPrice']), 2)
+
+        print(f"📍 Entry price (real): {entry_price}")
 
         # 🔥 ТРЕЙЛИНГ СТОП
+        trailing_callback = round(random.uniform(0.5, 1.0), 2)
+
         client.futures_create_order(
             symbol=SYMBOL,
             side=exit_side,
             type="TRAILING_STOP_MARKET",
-            callbackRate=TRAILING_CALLBACK,
-            quantity=QUANTITY
+            callbackRate=trailing_callback,
+            activationPrice=entry_price,
+            closePosition=True
         )
-        print(f"🎯 Trailing: {TRAILING_CALLBACK}%")
+        print(f"🎯 Trailing: {trailing_callback}%")
 
         return jsonify({"status": "order placed with trailing stop"})
 
