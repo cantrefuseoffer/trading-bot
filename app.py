@@ -14,13 +14,16 @@ SYMBOL = "BTCUSDT"
 RISK_PERCENT = 1
 LEVERAGE = 50
 
+TP_POINTS = 90
+SL_POINTS = 50 # защита
+
 last_signal = None
 
 # установка плеча
 try:
     client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
     print(f"✅ Установлено плечо {LEVERAGE}x")
-    except Exception as e:
+except Exception as e:
     print("❌ Ошибка установки плеча:", e)
 
 
@@ -76,72 +79,82 @@ def webhook():
 
     last_signal = signal
 
-try:
-    price_data = client.futures_mark_price(symbol=SYMBOL)
-    current_price = float(price_data['markPrice'])
+    try:
+        # текущая цена
+        price_data = client.futures_mark_price(symbol=SYMBOL)
+        current_price = float(price_data['markPrice'])
 
-    quantity = calculate_quantity(current_price)
+        # размер позиции
+        quantity = calculate_quantity(current_price)
+        print(f"📦 Qty: {quantity}")
 
-    position = get_position()
+        # закрываем старую позицию
+        position = get_position()
+        if position:
+            side = "SELL" if float(position['positionAmt']) > 0 else "BUY"
 
-    if position:
-        side = "SELL" if float(position['positionAmt']) > 0 else "BUY"
+            client.futures_create_order(
+                symbol=SYMBOL,
+                side=side,
+                type="MARKET",
+                quantity=abs(float(position['positionAmt']))
+             )
 
-        client.futures_create_order(
+        # направление
+        if signal == "LONG":
+            side = "BUY"
+            exit_side = "SELL"
+        elif signal == "SHORT":
+            side = "SELL"
+            exit_side = "BUY"
+        else:
+            return jsonify({"error": "unknown signal"}), 400
+
+        # вход
+        order = client.futures_create_order(
             symbol=SYMBOL,
             side=side,
             type="MARKET",
-            quantity=abs(float(position['positionAmt']))
+            quantity=quantity
         )
 
-     if signal == "LONG":
-         side = "BUY"
-     elif signal == "SHORT":
-         side = "SELL"
-     else:
-         return jsonify({"error": "unknown signal"}), 400
+        # цена входа
+        entry_price = float(order['avgPrice'])
+        if entry_price == 0:
+            ticker = client.futures_mark_price(symbol=SYMBOL)
+            entry_price = float(ticker['markPrice'])
 
-     order = client.futures_create_order(
-         symbol=SYMBOL,
-         side=side,
-         type="MARKET",
-         quantity=quantity
-     )
+        print(f"📍 Entry: {entry_price}")
 
-     entry_price = float(order['avgPrice'])
+        # TP / SL в пунктах
+        if signal == "LONG":
+            tp_price = round(entry_price + TP_POINTS, 2)
+            sl_price = round(entry_price - SL_POINTS, 2)
+        else:
+            tp_price = round(entry_price - TP_POINTS, 2)
+            sl_price = round(entry_price + SL_POINTS, 2)
 
-     if entry_price == 0:
-         ticker = client.futures_mark_price(symbol=SYMBOL)
-         entry_price = float(ticker['markPrice'])
+        # TP
+        client.futures_create_order(
+            symbol=SYMBOL,
+            side=exit_side,
+            type="TAKE_PROFIT_MARKET",
+            stopPrice=tp_price,
+            closePosition=True
+        )
 
-     if signal == "LONG":
-         tp_price = round(entry_price * 1.001, 2)
-         sl_price = round(entry_price * 0.999, 2)
-         exit_side = "SELL"
-     else:
-         tp_price = round(entry_price * 0.999, 2)
-         sl_price = round(entry_price * 1.001, 2)
-         exit_side = "BUY"
+        # SL
+        client.futures_create_order(
+            symbol=SYMBOL,
+            side=exit_side,
+            type="STOP_MARKET",
+            stopPrice=sl_price,
+            closePosition=True
+        )
 
-     client.futures_create_order(
-         symbol=SYMBOL,
-         side=exit_side,
-         type="TAKE_PROFIT_MARKET",
-         stopPrice=tp_price,
-         closePosition=True
-      )
+        print(f"🎯 TP: {tp_price}, SL: {sl_price}")
 
-      client.futures_create_order(
-          symbol=SYMBOL,
-          side=exit_side,
-          type="STOP_MARKET",
-          stopPrice=sl_price,
-          closePosition=True
-      )
-
-      print(f"🎯 TP: {tp_price}, SL: {sl_price}")
-
-      return jsonify({"status": "ok"})
+        return jsonify({"status": "ok"})
 
 except Exception as e:
     print("❌ Ошибка:", str(e))
