@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify
 from binance.client import Client
 import os
-import time
 
 app = Flask(__name__)
 
@@ -12,30 +11,44 @@ client = Client(API_KEY, API_SECRET)
 client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
 
 SYMBOL = "BTCUSDT"
-QUANTITY = 1
+RISK_PERCENT = 1
 LEVERAGE = 50
 
-# настройки стратегии
-import random
-
 last_signal = None
-last_trade_time = 0
-COOLDOWN = 120  # секунды
 
 # установка плеча
 try:
     client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
-    print(f"✅ Плечо установлено: {LEVERAGE}x")
-except Exception as e:
+    print(f"✅ Установлено плечо {LEVERAGE}x")
+    except Exception as e:
     print("❌ Ошибка установки плеча:", e)
+
 
 @app.route("/")
 def home():
     return "Bot is alive 🚀"
 
+
 @app.route("/health")
 def health():
-    return "ok", 200
+    return {"status": "ok"}
+
+
+def get_balance():
+    balance = client.futures_account_balance()
+    for b in balance:
+        if b['asset'] == 'USDT':
+            return float(b['balance'])
+    return 0
+
+
+def calculate_quantity(price):
+    balance = get_balance()
+    risk_amount = balance * (RISK_PERCENT / 100)
+    position_size = risk_amount * LEVERAGE
+    qty = position_size / price
+    return round(qty, 3)
+
 
 def get_position():
     positions = client.futures_position_information(symbol=SYMBOL)
@@ -44,9 +57,10 @@ def get_position():
             return p
     return None
 
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    global last_signal, last_trade_time
+    global last_signal
 
     data = request.json
 
@@ -54,90 +68,81 @@ def webhook():
         return jsonify({"error": "no data"}), 400
 
     signal = data.get("signal")
-
     print("🔥 Сигнал:", signal)
 
-    # защита от дублей
     if signal == last_signal:
         print("⚠️ Дубликат сигнала")
         return jsonify({"status": "duplicate ignored"})
 
-    # cooldown
-    if time.time() - last_trade_time < COOLDOWN:
-        print("⏳ Cooldown активен")
-        return jsonify({"status": "cooldown"})
-
     last_signal = signal
-    last_trade_time = time.time()
 
-    try:
-        position = get_position()
+try:
+    price_data = client.futures_mark_price(symbol=SYMBOL)
+    current_price = float(price_data['markPrice'])
 
-        # закрываем старую позицию
-        if position:
-            print("🔄 Закрываем текущую позицию")
+    quantity = calculate_quantity(current_price)
 
-            side = "SELL" if float(position['positionAmt']) > 0 else "BUY"
+    position = get_position()
 
-            client.futures_create_order(
-                symbol=SYMBOL,
-                side=side,
-                type="MARKET",
-                quantity=abs(float(position['positionAmt']))
-            )
-
-        # определяем сторону
-        if signal == "LONG":
-            side = "BUY"
-            exit_side = "SELL"
-        elif signal == "SHORT":
-            side = "SELL"
-            exit_side = "BUY"
-        else:
-            return jsonify({"error": "unknown signal"}), 400
-
-        # открытие позиции
-        order = client.futures_create_order(
-            symbol=SYMBOL,
-            side=side,
-            type="MARKET",
-            quantity=QUANTITY
-        )
-
-        print("✅ Открыта позиция:", order)
-
-        time.sleep(2)
-
-        ticker = client.futures_mark_price(symbol=SYMBOL)
-        entry_price = round(float(ticker['markPrice']), 2)
-
-        print(f"📍 Entry price (real): {entry_price}")
-
-        position = get_position()
-
-        if not position:
-            print("Позиция не найдена, пробуем еще раз...")
-            time.sleep(1)
-            position = get_position()
-
-        if not position:
-            return jsonify({"error": "position not found"}), 500
-        qty = abs(float(position['positionAmt']))
-
-        # 🔥 ТРЕЙЛИНГ СТОП
-        trailing_callback = round(random.uniform(0.5, 1.0), 2)
+    if position:
+        side = "SELL" if float(position['positionAmt']) > 0 else "BUY"
 
         client.futures_create_order(
             symbol=SYMBOL,
-            side=exit_side,
-            type="TRAILING_STOP_MARKET",
-            callbackRate=trailing_callback,
-            quantity=qty
+            side=side,
+            type="MARKET",
+            quantity=abs(float(position['positionAmt']))
         )
-        print(f"🎯 Trailing: {trailing_callback}%")
 
-        return jsonify({"status": "order placed with trailing stop"})
+     if signal == "LONG":
+         side = "BUY"
+     elif signal == "SHORT":
+         side = "SELL"
+     else:
+         return jsonify({"error": "unknown signal"}), 400
 
-    except Exception as e:
-        print("❌ Ошибка:", str(e))
-        return jsonify({"error": str(e)}), 500
+     order = client.futures_create_order(
+         symbol=SYMBOL,
+         side=side,
+         type="MARKET",
+         quantity=quantity
+     )
+
+     entry_price = float(order['avgPrice'])
+
+     if entry_price == 0:
+         ticker = client.futures_mark_price(symbol=SYMBOL)
+         entry_price = float(ticker['markPrice'])
+
+     if signal == "LONG":
+         tp_price = round(entry_price * 1.001, 2)
+         sl_price = round(entry_price * 0.999, 2)
+         exit_side = "SELL"
+     else:
+         tp_price = round(entry_price * 0.999, 2)
+         sl_price = round(entry_price * 1.001, 2)
+         exit_side = "BUY"
+
+     client.futures_create_order(
+         symbol=SYMBOL,
+         side=exit_side,
+         type="TAKE_PROFIT_MARKET",
+         stopPrice=tp_price,
+         closePosition=True
+      )
+
+      client.futures_create_order(
+          symbol=SYMBOL,
+          side=exit_side,
+          type="STOP_MARKET",
+          stopPrice=sl_price,
+          closePosition=True
+      )
+
+      print(f"🎯 TP: {tp_price}, SL: {sl_price}")
+
+      return jsonify({"status": "ok"})
+
+except Exception as e:
+    print("❌ Ошибка:", str(e))
+    return jsonify({"error": str(e)}), 500
