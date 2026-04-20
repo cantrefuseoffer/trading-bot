@@ -80,15 +80,12 @@ def webhook():
     last_signal = signal
 
     try:
-        # текущая цена
         price_data = client.futures_mark_price(symbol=SYMBOL)
         current_price = float(price_data['markPrice'])
 
-        # размер позиции
         quantity = calculate_quantity(current_price)
         print(f"📦 Qty: {quantity}")
 
-        # закрываем старую позицию
         position = get_position()
         if position:
             side = "SELL" if float(position['positionAmt']) > 0 else "BUY"
@@ -100,7 +97,6 @@ def webhook():
                 quantity=abs(float(position['positionAmt']))
              )
 
-        # направление
         if signal == "LONG":
             side = "BUY"
             exit_side = "SELL"
@@ -110,7 +106,6 @@ def webhook():
         else:
             return jsonify({"error": "unknown signal"}), 400
 
-        # вход
         order = client.futures_create_order(
             symbol=SYMBOL,
             side=side,
@@ -118,23 +113,18 @@ def webhook():
             quantity=quantity
         )
 
-        # цена входа
         entry_price = float(order['avgPrice'])
         if entry_price == 0:
             ticker = client.futures_mark_price(symbol=SYMBOL)
             entry_price = float(ticker['markPrice'])
 
-        print(f"📍 Entry: {entry_price}")
-
-        # TP / SL в пунктах
         if signal == "LONG":
-            tp_price = round(entry_price + TP_POINTS, 2)
-            sl_price = round(entry_price - SL_POINTS, 2)
+            tp_price = round(entry_price + TP_POINTS, 1)
+            sl_price = round(entry_price - SL_POINTS, 1)
         else:
-            tp_price = round(entry_price - TP_POINTS, 2)
-            sl_price = round(entry_price + SL_POINTS, 2)
+            tp_price = round(entry_price - TP_POINTS, 1)
+            sl_price = round(entry_price + SL_POINTS, 1)
 
-        # TP
         client.futures_create_order(
             symbol=SYMBOL,
             side=exit_side,
@@ -143,7 +133,6 @@ def webhook():
             closePosition=True
         )
 
-        # SL
         client.futures_create_order(
             symbol=SYMBOL,
             side=exit_side,
