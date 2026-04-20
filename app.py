@@ -15,7 +15,7 @@ RISK_PERCENT = 1
 LEVERAGE = 50
 
 TP_POINTS = 90
-SL_POINTS = 50 # защита
+SL_POINTS = 50
 
 last_signal = None
 
@@ -26,16 +26,13 @@ try:
 except Exception as e:
     print("❌ Ошибка установки плеча:", e)
 
-
 @app.route("/")
 def home():
     return "Bot is alive 🚀"
 
-
 @app.route("/health")
 def health():
     return {"status": "ok"}
-
 
 def get_balance():
     balance = client.futures_account_balance()
@@ -44,7 +41,6 @@ def get_balance():
             return float(b['balance'])
     return 0
 
-
 def calculate_quantity(price):
     balance = get_balance()
     risk_amount = balance * (RISK_PERCENT / 100)
@@ -52,14 +48,12 @@ def calculate_quantity(price):
     qty = position_size / price
     return round(qty, 3)
 
-
 def get_position():
     positions = client.futures_position_information(symbol=SYMBOL)
     for p in positions:
         if float(p['positionAmt']) != 0:
             return p
     return None
-
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -95,7 +89,7 @@ def webhook():
                 side=side,
                 type="MARKET",
                 quantity=abs(float(position['positionAmt']))
-             )
+            )
 
         if signal == "LONG":
             side = "BUY"
@@ -117,6 +111,8 @@ def webhook():
         if entry_price == 0:
             ticker = client.futures_mark_price(symbol=SYMBOL)
             entry_price = float(ticker['markPrice'])
+
+        print(f"📍 Entry: {entry_price}")
 
         if signal == "LONG":
             tp_price = round(entry_price + TP_POINTS, 1)
@@ -145,6 +141,6 @@ def webhook():
 
         return jsonify({"status": "ok"})
 
-except Exception as e:
-    print("❌ Ошибка:", str(e))
-    return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        print("❌ Ошибка:", str(e))
+        return jsonify({"error": str(e)}), 500
