@@ -11,7 +11,7 @@ client = Client(API_KEY, API_SECRET)
 client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
 
 SYMBOL = "BTCUSDT"
-RISK_PERCENT = 1
+RISK_PERCENT = 10
 LEVERAGE = 50
 
 TP_POINTS = 90
