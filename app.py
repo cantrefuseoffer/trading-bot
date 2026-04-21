@@ -115,11 +115,14 @@ def webhook():
         print(f"📍 Entry: {entry_price}")
 
         if signal == "LONG":
-            tp_price = round(entry_price + TP_POINTS, 1)
-            sl_price = round(entry_price - SL_POINTS, 1)
+            tp_price = max(entry_price + TP_POINTS, current_price + 5)
+            sl_price = min(entry_price + SL_POINTS, current_price - 5)
         else:
-            tp_price = round(entry_price - TP_POINTS, 1)
-            sl_price = round(entry_price + SL_POINTS, 1)
+            tp_price = min(entry_price - TP_POINTS, current_price - 5)
+            sl_price = max(entry_price + SL_POINTS, current_price + 5)
+
+        tp_price = round(tp_price, 2)
+        sl_price = round(sl_price, 2)
 
         client.futures_create_order(
             symbol=SYMBOL,
