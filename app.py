@@ -26,21 +26,19 @@ last_signal = None
 def home():
     return "Bybit bot is alive 🚀"
 
+
 @app.route("/health")
 def health():
     return {"status": "ok"}
 
-def get_position():
-    positions = session.get_positions(
-        category="linear",
-        symbol=SYMBOL
-    )
 
+def get_position():
+    positions = session.get_positions(category="linear", symbol=SYMBOL)
     for p in positions["result"]["list"]:
         if float(p["size"]) > 0:
             return p
-
     return None
+
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -55,57 +53,70 @@ def webhook():
     print("🔥 Сигнал:", signal)
 
     if signal == last_signal:
-        return jsonify({"status": "duplicate ignored"})
+        print("⚠️ Дубликат")
+        return jsonify({"status": "duplicate"})
 
     last_signal = signal
 
     try:
         # получаем текущую цену
         ticker = session.get_tickers(category="linear", symbol=SYMBOL)
-        price = float(ticker["result"]["list"][0]["lastPrice"])
+        price = float(ticker['result']['list'][0]['lastPrice'])
+        
+        qty = 0.01
+        print(f"📦 Qty: {qty}")
 
-        # закрываем позицию если есть
         position = get_position()
+
         if position:
-            side = "Sell" if position["side"] == "Buy" else "Buy"
+            print("🔄 Закрываем старую позицию")
+
+            side = "Sell" if position['side'] == "Buy" else "Buy"
 
             session.place_order(
                 category="linear",
                 symbol=SYMBOL,
                 side=side,
                 orderType="Market",
-                qty=position["size"],
+                qty=position['size'],
                 reduceOnly=True
             )
 
          # направление сделки
          if signal == "LONG":
              side = "Buy"
-             tp = price + TP_POINTS
-             sl = price - SL_POINTS
+             tp_price = price + TP_POINTS
+             sl_price = price - SL_POINTS
          elif signal == "SHORT":
              side = "Sell"
-             tp = price - TP_POINTS
-             sl = price + SL_POINTS
+             tp_price = price - TP_POINTS
+             sl_price = price + SL_POINTS
          else:
-             return jsonify({"error": "unknown signal"}), 400
+             return jsonify({"error": "wrong signal"}), 400
 
-         # открываем позицию СРАЗУ с TP/SL
+         # открыие позиции
          order = session.place_order(
              category="linear",
              symbol=SYMBOL,
              side=side,
              orderType="Market",
-             qty=QTY,
-             takeProfit=round(tp, 2),
-             stopLoss=round(sl, 2)
+             qty=qty
           )
 
-          print(f"📍 Entry ~ {price}")
-          print(f"🎯 TP: {tp} | 🛑 SL: {sl}")
+          print(f"📍 Entry: {price}")
 
-          return jsonify({"status": "order placed"})
+          session.set_trading_stop(
+              category="linear",
+              symbol=SYMBOL,
+              takeProfit=str(round(tp_price, 2)),
+              stopLoss=str(round(sl_price, 2)),
+              positionIdx=0
+           )
 
-    except Exception as e:
-        print("❌ Ошибка:", str(e))
-        return jsonify({"error": str(e)}), 500
+          print(f"🎯 TP: {tp_price} | SL: {sl_price}")
+
+          return jsonify({"status": "ok"})
+
+      except Exception as e:
+          print("❌ Ошибка:", str(e))
+          return jsonify({"error": str(e)}), 500
