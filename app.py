@@ -44,13 +44,16 @@ def get_position():
 def webhook():
     global last_signal
 
-    data = request.json
+    data = request.get_json(silent=True)
 
     if not data:
         return jsonify({"error": "no data"}), 400
 
-    signal = data.get("signal")
+    signal = str(data.get("signal", "")).upper()
     print("🔥 Сигнал:", signal)
+
+    if signal not in ("LONG", "SHORT"):
+        return jsonify({"error": "wrong signal"}), 400
 
     if signal == last_signal:
         print("⚠️ Дубликат")
@@ -63,8 +66,7 @@ def webhook():
         ticker = session.get_tickers(category="linear", symbol=SYMBOL)
         price = float(ticker['result']['list'][0]['lastPrice'])
 
-        qty = 0.01
-        print(f"📦 Qty: {qty}")
+        print(f"📦 Qty: {QTY}")
 
         position = get_position()
 
@@ -87,20 +89,18 @@ def webhook():
             side = "Buy"
             tp_price = price + TP_POINTS
             sl_price = price - SL_POINTS
-        elif signal == "SHORT":
+        else:
             side = "Sell"
             tp_price = price - TP_POINTS
             sl_price = price + SL_POINTS
-        else:
-            return jsonify({"error": "wrong signal"}), 400
 
         # открытие позиции
-        order = session.place_order(
+        session.place_order(
             category="linear",
             symbol=SYMBOL,
             side=side,
             orderType="Market",
-            qty=qty
+            qty=QTY
         )
 
         print(f"📍 Entry: {price}")
