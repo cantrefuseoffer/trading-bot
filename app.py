@@ -16,8 +16,8 @@ session = HTTP(
 SYMBOL = "BTCUSDT"
 QTY = 0.001
 
-TP_POINTS = 95
-SL_POINTS = 40
+TP_POINTS = 75
+SL_POINTS = 50
 
 last_signal = None
 
@@ -62,7 +62,7 @@ def webhook():
         # получаем текущую цену
         ticker = session.get_tickers(category="linear", symbol=SYMBOL)
         price = float(ticker['result']['list'][0]['lastPrice'])
-        
+
         qty = 0.01
         print(f"📦 Qty: {qty}")
 
@@ -82,41 +82,41 @@ def webhook():
                 reduceOnly=True
             )
 
-         # направление сделки
-         if signal == "LONG":
-             side = "Buy"
-             tp_price = price + TP_POINTS
-             sl_price = price - SL_POINTS
-         elif signal == "SHORT":
-             side = "Sell"
-             tp_price = price - TP_POINTS
-             sl_price = price + SL_POINTS
-         else:
-             return jsonify({"error": "wrong signal"}), 400
+        # направление сделки
+        if signal == "LONG":
+            side = "Buy"
+            tp_price = price + TP_POINTS
+            sl_price = price - SL_POINTS
+        elif signal == "SHORT":
+            side = "Sell"
+            tp_price = price - TP_POINTS
+            sl_price = price + SL_POINTS
+        else:
+            return jsonify({"error": "wrong signal"}), 400
 
-         # открыие позиции
-         order = session.place_order(
-             category="linear",
-             symbol=SYMBOL,
-             side=side,
-             orderType="Market",
-             qty=qty
-          )
+        # открытие позиции
+        order = session.place_order(
+            category="linear",
+            symbol=SYMBOL,
+            side=side,
+            orderType="Market",
+            qty=qty
+        )
 
-          print(f"📍 Entry: {price}")
+        print(f"📍 Entry: {price}")
 
-          session.set_trading_stop(
-              category="linear",
-              symbol=SYMBOL,
-              takeProfit=str(round(tp_price, 2)),
-              stopLoss=str(round(sl_price, 2)),
-              positionIdx=0
-           )
+        session.set_trading_stop(
+            category="linear",
+            symbol=SYMBOL,
+            takeProfit=str(round(tp_price, 2)),
+            stopLoss=str(round(sl_price, 2)),
+            positionIdx=0
+        )
 
-          print(f"🎯 TP: {tp_price} | SL: {sl_price}")
+        print(f"🎯 TP: {tp_price} | SL: {sl_price}")
 
-          return jsonify({"status": "ok"})
+        return jsonify({"status": "ok"})
 
-      except Exception as e:
-          print("❌ Ошибка:", str(e))
-          return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        print("❌ Ошибка:", str(e))
+        return jsonify({"error": str(e)}), 500
