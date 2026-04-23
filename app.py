@@ -1,58 +1,45 @@
 from flask import Flask, request, jsonify
-from binance.client import Client
+from pybit.unified_trading import HTTP
 import os
 
 app = Flask(__name__)
 
-API_KEY = os.environ.get("BINANCE_API_KEY")
-API_SECRET = os.environ.get("BINANCE_SECRET_KEY")
+API_KEY = os.environ.get("BYBIT_API_KEY")
+API_SECRET = os.environ.get("BYBIT_SECRET_KEY")
 
-client = Client(API_KEY, API_SECRET)
-client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
+session = HTTP(
+    testnet=True,
+    api_key=API_KEY,
+    api_secret=API_SECRET
+)
 
 SYMBOL = "BTCUSDT"
-RISK_PERCENT = 20
-LEVERAGE = 50
+QTY = 0.001
 
-TP_POINTS = 90
+TP_POINTS = 95
 SL_POINTS = 40
 
 last_signal = None
 
-# установка плеча
-try:
-    client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
-    print(f"✅ Установлено плечо {LEVERAGE}x")
-except Exception as e:
-    print("❌ Ошибка установки плеча:", e)
 
 @app.route("/")
 def home():
-    return "Bot is alive 🚀"
+    return "Bybit bot is alive 🚀"
 
 @app.route("/health")
 def health():
-    return {"status": "ok"}
-
-def get_balance():
-    balance = client.futures_account_balance()
-    for b in balance:
-        if b['asset'] == 'USDT':
-            return float(b['balance'])
-    return 0
-
-def calculate_quantity(price):
-    balance = get_balance()
-    risk_amount = balance * (RISK_PERCENT / 100)
-    position_size = risk_amount * LEVERAGE
-    qty = position_size / price
-    return round(qty, 3)
+return {"status": "ok"}
 
 def get_position():
-    positions = client.futures_position_information(symbol=SYMBOL)
-    for p in positions:
-        if float(p['positionAmt']) != 0:
+    positions = session.get_positions(
+        category="linear",
+        symbol=SYMBOL
+    )
+
+    for p in positions["result"]["list"]:
+        if float(p["size"]) > 0:
             return p
+
     return None
 
 @app.route("/webhook", methods=["POST"])
@@ -68,81 +55,56 @@ def webhook():
     print("🔥 Сигнал:", signal)
 
     if signal == last_signal:
-        print("⚠️ Дубликат сигнала")
         return jsonify({"status": "duplicate ignored"})
 
     last_signal = signal
 
     try:
-        price_data = client.futures_mark_price(symbol=SYMBOL)
-        current_price = float(price_data['markPrice'])
+        # получаем текущую цену
+        ticker = session.get_tickers(category="linear", symbol=SYMBOL)
+        price = float(ticker["result"]["list"][0]["lastPrice"])
 
-        quantity = calculate_quantity(current_price)
-        print(f"📦 Qty: {quantity}")
-
+        # закрываем позицию если есть
         position = get_position()
         if position:
-            side = "SELL" if float(position['positionAmt']) > 0 else "BUY"
+            side = "Sell" if position["side"] == "Buy" else "Buy"
 
-            client.futures_create_order(
+            session.place_order(
+                category="linear",
                 symbol=SYMBOL,
                 side=side,
-                type="MARKET",
-                quantity=abs(float(position['positionAmt']))
+                orderType="Market",
+                qty=position["size"],
+                reduceOnly=True
             )
 
-        if signal == "LONG":
-            side = "BUY"
-            exit_side = "SELL"
-        elif signal == "SHORT":
-            side = "SELL"
-            exit_side = "BUY"
-        else:
-            return jsonify({"error": "unknown signal"}), 400
+         # направление сделки
+         if signal == "LONG":
+             side = "Buy"
+             tp = price + TP_POINTS
+             sl = price - SL_POINTS
+         elif signal == "SHORT":
+             side = "Sell"
+             tp = price - TP_POINTS
+             sl = price + SL_POINTS
+         else:
+             return jsonify({"error": "unknown signal"}), 400
 
-        order = client.futures_create_order(
-            symbol=SYMBOL,
-            side=side,
-            type="MARKET",
-            quantity=quantity
-        )
+         # открываем позицию СРАЗУ с TP/SL
+         order = session.place_order(
+             category="linear",
+             symbol=SYMBOL,
+             side=side,
+             orderType="Market",
+             qty=QTY,
+             takeProfit=round(tp, 2),
+             stopLoss=round(sl, 2)
+          )
 
-        entry_price = float(order['avgPrice'])
-        if entry_price == 0:
-            ticker = client.futures_mark_price(symbol=SYMBOL)
-            entry_price = float(ticker['markPrice'])
+          print(f"📍 Entry ~ {price}")
+          print(f"🎯 TP: {tp} | 🛑 SL: {sl}")
 
-        print(f"📍 Entry: {entry_price}")
-
-        if signal == "LONG":
-            tp_price = max(entry_price + TP_POINTS, current_price + 5)
-            sl_price = min(entry_price + SL_POINTS, current_price - 5)
-        else:
-            tp_price = min(entry_price - TP_POINTS, current_price - 5)
-            sl_price = max(entry_price + SL_POINTS, current_price + 5)
-
-        tp_price = round(tp_price, 2)
-        sl_price = round(sl_price, 2)
-
-        client.futures_create_order(
-            symbol=SYMBOL,
-            side=exit_side,
-            type="TAKE_PROFIT_MARKET",
-            stopPrice=tp_price,
-            closePosition=True
-        )
-
-        client.futures_create_order(
-            symbol=SYMBOL,
-            side=exit_side,
-            type="STOP_MARKET",
-            stopPrice=sl_price,
-            closePosition=True
-        )
-
-        print(f"🎯 TP: {tp_price}, SL: {sl_price}")
-
-        return jsonify({"status": "ok"})
+          return jsonify({"status": "order placed"})
 
     except Exception as e:
         print("❌ Ошибка:", str(e))
