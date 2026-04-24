@@ -22,6 +22,18 @@ SL_POINTS = 50
 last_signal = None
 
 
+def extract_signal(payload):
+    """
+    Normalize TradingView signal payloads.
+    Supports common keys used in webhook alerts: signal, action, side.
+    """
+    for key in ("signal", "action", "side"):
+        value = payload.get(key)
+        if value is not None:
+            return str(value).upper()
+    return ""
+
+
 @app.route("/")
 def home():
     return "Bybit bot is alive 🚀"
@@ -49,7 +61,7 @@ def webhook():
     if not data:
         return jsonify({"error": "no data"}), 400
 
-    signal = str(data.get("signal", "")).upper()
+    signal = extract_signal(data)
     print("🔥 Сигнал:", signal)
 
     if signal not in ("LONG", "SHORT"):
@@ -58,8 +70,6 @@ def webhook():
     if signal == last_signal:
         print("⚠️ Дубликат")
         return jsonify({"status": "duplicate"})
-
-    last_signal = signal
 
     try:
         # получаем текущую цену
@@ -114,6 +124,9 @@ def webhook():
         )
 
         print(f"🎯 TP: {tp_price} | SL: {sl_price}")
+
+        # mark only successful execution as last processed signal
+        last_signal = signal
 
         return jsonify({"status": "ok"})
 
