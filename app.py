@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from flask import Flask, request, jsonify
 from pybit.unified_trading import HTTP
@@ -18,25 +19,11 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def required_env(name):
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
+API_KEY = os.environ.get("BYBIT_API_KEY")
+API_SECRET = os.environ.get("BYBIT_SECRET_KEY") or os.environ.get("BYBIT_API_SECRET")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
 
-
-def env_bool(name, default):
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-API_KEY = required_env("BYBIT_API_KEY")
-API_SECRET = required_env("BYBIT_SECRET_KEY")
-WEBHOOK_SECRET = required_env("WEBHOOK_SECRET")
-
-TESTNET = env_bool("BYBIT_TESTNET", True)
+TESTNET = os.environ.get("BYBIT_TESTNET", "true").lower() in {"1", "true", "yes", "on"}
 CATEGORY = os.environ.get("BYBIT_CATEGORY", "linear")
 SYMBOL = os.environ.get("BYBIT_SYMBOL", "BTCUSDT").upper()
 
@@ -54,14 +41,11 @@ ALLOWED_TIMEFRAMES = {
 CLOSE_WAIT_SECONDS = float(os.environ.get("CLOSE_WAIT_SECONDS", "5"))
 POLL_INTERVAL_SECONDS = float(os.environ.get("POLL_INTERVAL_SECONDS", "0.3"))
 
-session = HTTP(
-    testnet=TESTNET,
-    api_key=API_KEY,
-    api_secret=API_SECRET
-)
-
 trade_lock = Lock()
-processed_alerts = set()
+processed_alerts = OrderedDict()
+processed_alerts_limit = 1000
+
+session = None
 instrument_rules = None
 
 
@@ -69,23 +53,44 @@ class BybitError(Exception):
     pass
 
 
+def missing_config():
+    missing = []
+
+    if not API_KEY:
+        missing.append("BYBIT_API_KEY")
+    if not API_SECRET:
+        missing.append("BYBIT_SECRET_KEY")
+    if not WEBHOOK_SECRET:
+        missing.append("WEBHOOK_SECRET")
+
+    return missing
+
+
+def get_session():
+    global session
+
+    missing = missing_config()
+    if missing:
+        raise RuntimeError(f"Missing environment variables: {', '.join(missing)}")
+
+    if session is None:
+        session = HTTP(
+            testnet=TESTNET,
+            api_key=API_KEY,
+            api_secret=API_SECRET
+        )
+
+    return session
+
+
 def bybit_call(method, **kwargs):
     response = method(**kwargs)
 
     if response.get("retCode") != 0:
-        raise BybitError(
-            f"{method.__name__} failed: "
-            f"{response.get('retCode')} {response.get('retMsg')}"
-        )
+        name = getattr(method, "__name__", "bybit_call")
+        raise BybitError(f"{name} failed: {response.get('retCode')} {response.get('retMsg')}")
 
     return response
-
-
-def decimal_from(value, field_name):
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, TypeError):
-        raise ValueError(f"Invalid decimal value for {field_name}: {value}")
 
 
 def format_decimal(value):
@@ -106,8 +111,10 @@ def get_instrument_rules():
     if instrument_rules is not None:
         return instrument_rules
 
+    s = get_session()
+
     response = bybit_call(
-        session.get_instruments_info,
+        s.get_instruments_info,
         category=CATEGORY,
         symbol=SYMBOL
     )
@@ -148,7 +155,7 @@ def normalize_ticker(ticker):
 
 def verify_secret(data):
     provided = request.headers.get("X-Webhook-Secret") or data.get("secret") or ""
-    return hmac.compare_digest(str(provided), WEBHOOK_SECRET)
+    return hmac.compare_digest(str(provided), str(WEBHOOK_SECRET))
 
 
 def clean_payload(data):
@@ -158,13 +165,19 @@ def clean_payload(data):
     return safe
 
 
+def remember_alert(alert_id):
+    processed_alerts[alert_id] = time.time()
+
+    while len(processed_alerts) > processed_alerts_limit:
+        processed_alerts.popitem(last=False)
+
+
+def forget_alert(alert_id):
+    processed_alerts.pop(alert_id, None)
+
+
 def alert_id_from(data, signal):
-    raw_id = (
-        data.get("alert_id")
-        or data.get("id")
-        or data.get("bar_time")
-        or data.get("time")
-    )
+    raw_id = data.get("alert_id") or data.get("id") or data.get("bar_time") or data.get("time")
 
     if not raw_id:
         return ""
@@ -185,9 +198,18 @@ def position_idx_for_side(side):
     return 0
 
 
+def position_idx_from_position(position):
+    try:
+        return int(position.get("positionIdx"))
+    except (TypeError, ValueError):
+        return position_idx_for_side(position["side"])
+
+
 def get_last_price():
+    s = get_session()
+
     response = bybit_call(
-        session.get_tickers,
+        s.get_tickers,
         category=CATEGORY,
         symbol=SYMBOL
     )
@@ -196,8 +218,10 @@ def get_last_price():
 
 
 def get_open_positions():
+    s = get_session()
+
     response = bybit_call(
-        session.get_positions,
+        s.get_positions,
         category=CATEGORY,
         symbol=SYMBOL
     )
@@ -205,7 +229,11 @@ def get_open_positions():
     positions = []
 
     for position in response["result"]["list"]:
-        size = Decimal(str(position.get("size", "0")))
+        try:
+            size = Decimal(str(position.get("size", "0")))
+        except InvalidOperation:
+            continue
+
         side = position.get("side")
 
         if size > 0 and side in {"Buy", "Sell"}:
@@ -215,24 +243,20 @@ def get_open_positions():
 
 
 def close_position(position):
+    s = get_session()
     close_side = "Sell" if position["side"] == "Buy" else "Buy"
 
-    log.info(
-        "Closing %s position: symbol=%s size=%s",
-        position["side"],
-        SYMBOL,
-        position["size"]
-    )
+    log.info("Closing %s position: symbol=%s size=%s", position["side"], SYMBOL, position["size"])
 
     return bybit_call(
-        session.place_order,
+        s.place_order,
         category=CATEGORY,
         symbol=SYMBOL,
         side=close_side,
         orderType="Market",
         qty=str(position["size"]),
         reduceOnly=True,
-        positionIdx=int(position.get("positionIdx", position_idx_for_side(position["side"])))
+        positionIdx=position_idx_from_position(position)
     )
 
 
@@ -240,8 +264,7 @@ def wait_until_side_closed(side):
     deadline = time.time() + CLOSE_WAIT_SECONDS
 
     while time.time() < deadline:
-        open_positions = get_open_positions()
-        still_open = any(position["side"] == side for position in open_positions)
+        still_open = any(position["side"] == side for position in get_open_positions())
 
         if not still_open:
             return True
@@ -258,8 +281,11 @@ def home():
 
 @app.route("/health")
 def health():
+    missing = missing_config()
+
     return jsonify({
-        "status": "ok",
+        "status": "ok" if not missing else "missing_config",
+        "missing": missing,
         "symbol": SYMBOL,
         "category": CATEGORY,
         "testnet": TESTNET,
@@ -269,6 +295,13 @@ def health():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    missing = missing_config()
+    if missing:
+        return jsonify({
+            "error": "missing_config",
+            "missing": missing
+        }), 500
+
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
@@ -311,27 +344,31 @@ def webhook():
             })
 
         if alert_id:
-            processed_alerts.add(alert_id)
+            remember_alert(alert_id)
 
         try:
             rules = get_instrument_rules()
 
             qty = round_qty(ORDER_QTY, rules["qty_step"])
             if qty < rules["min_qty"]:
-                raise ValueError(
-                    f"ORDER_QTY {ORDER_QTY} is below minimum quantity {rules['min_qty']}"
-                )
+                raise ValueError(f"ORDER_QTY {ORDER_QTY} is below minimum {rules['min_qty']}")
 
             open_positions = get_open_positions()
-
-            same_side_positions = [
-                position for position in open_positions
-                if position["side"] == desired_side
-            ]
-
             opposite_positions = [
                 position for position in open_positions
                 if position["side"] != desired_side
+            ]
+
+            for position in opposite_positions:
+                close_position(position)
+
+                if not wait_until_side_closed(position["side"]):
+                    raise BybitError(f"Timed out waiting for {position['side']} position to close")
+
+            open_positions = get_open_positions()
+            same_side_positions = [
+                position for position in open_positions
+                if position["side"] == desired_side
             ]
 
             if same_side_positions:
@@ -343,14 +380,6 @@ def webhook():
                     "size": same_side_positions[0]["size"]
                 })
 
-            for position in opposite_positions:
-                close_position(position)
-
-                if not wait_until_side_closed(position["side"]):
-                    raise BybitError(
-                        f"Timed out waiting for {position['side']} position to close"
-                    )
-
             price = get_last_price()
 
             if signal == "LONG":
@@ -361,9 +390,10 @@ def webhook():
                 sl_price = round_price(price + SL_POINTS, rules["tick_size"])
 
             order_link_id = make_order_link_id(signal, alert_id)
+            s = get_session()
 
             order = bybit_call(
-                session.place_order,
+                s.place_order,
                 category=CATEGORY,
                 symbol=SYMBOL,
                 side=desired_side,
@@ -405,7 +435,7 @@ def webhook():
 
         except Exception:
             if alert_id:
-                processed_alerts.discard(alert_id)
+                forget_alert(alert_id)
             raise
 
 
