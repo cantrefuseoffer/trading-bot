@@ -155,7 +155,14 @@ def normalize_ticker(ticker):
 
 def verify_secret(data):
     provided = request.headers.get("X-Webhook-Secret") or data.get("secret") or ""
-    return hmac.compare_digest(str(provided), str(WEBHOOK_SECRET))
+    expected = WEBHOOK_SECRET or ""
+
+    provided = str(provided).strip()
+    expected = str(expected).strip()
+
+    log.info("Secret check: provided=%r expected=%r", provided, expected)
+
+    return hmac.compare_digest(provided, expected)
 
 
 def clean_payload(data):
