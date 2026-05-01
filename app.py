@@ -27,7 +27,7 @@ TESTNET = os.environ.get("BYBIT_TESTNET", "true").lower() in {"1", "true", "yes"
 CATEGORY = os.environ.get("BYBIT_CATEGORY", "linear")
 SYMBOL = os.environ.get("BYBIT_SYMBOL", "BTCUSDT").upper()
 
-ORDER_QTY = Decimal(os.environ.get("ORDER_QTY", "1"))
+ORDER_QTY = Decimal(os.environ.get("ORDER_QTY", "0.001"))
 TP_POINTS = Decimal(os.environ.get("TP_POINTS", "90"))
 SL_POINTS = Decimal(os.environ.get("SL_POINTS", "40"))
 
